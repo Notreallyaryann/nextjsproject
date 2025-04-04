@@ -16,42 +16,35 @@ export async function POST(request: Request) {
 
     if (existingVerifiedUserByUsername) {
       return Response.json(
-        {
-          success: false,
-          message: 'Username is already taken',
-        },
+        { success: false, message: 'Username is already taken' },
         { status: 400 }
       );
     }
 
     const existingUserByEmail = await UserModel.findOne({ email });
     let verifyCode = Math.floor(100000 + Math.random() * 900000).toString();
+    let expiryDate = new Date(Date.now() + 3600000); // 1 hour from now
+
+    console.log("Current Time:", new Date());
+    console.log("Expiry Time:", expiryDate);
 
     if (existingUserByEmail) {
       if (existingUserByEmail.isVerified) {
         return Response.json(
-          {
-            success: false,
-            message: 'User already exists with this email',
-          },
+          { success: false, message: 'User already exists with this email' },
           { status: 400 }
         );
       } else {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        existingUserByEmail.password = hashedPassword;
+        existingUserByEmail.password = await bcrypt.hash(password, 10);
         existingUserByEmail.verifyCode = verifyCode;
-        existingUserByEmail.verifyCodeExpiry = new Date(Date.now() + 3600000);
+        existingUserByEmail.verifyCodeExpiry = expiryDate;
         await existingUserByEmail.save();
       }
     } else {
-      const hashedPassword = await bcrypt.hash(password, 10);
-      const expiryDate = new Date();
-      expiryDate.setHours(expiryDate.getHours() + 1);
-
       const newUser = new UserModel({
         username,
         email,
-        password: hashedPassword,
+        password: await bcrypt.hash(password, 10),
         verifyCode,
         verifyCodeExpiry: expiryDate,
         isVerified: false,
@@ -59,39 +52,31 @@ export async function POST(request: Request) {
         messages: [],
       });
 
+      console.log("New User Data Before Saving:", newUser);
       await newUser.save();
     }
 
+    // Fetch user again to verify stored expiry
+    const savedUser = await UserModel.findOne({ email });
+    console.log("Saved User Expiry:", savedUser?.verifyCodeExpiry);
+
     // Send verification email
-    const emailResponse = await sendVerificationEmail(
-      email,
-      username,
-      verifyCode
-    );
+    const emailResponse = await sendVerificationEmail(email, username, verifyCode);
     if (!emailResponse.success) {
       return Response.json(
-        {
-          success: false,
-          message: emailResponse.message,
-        },
+        { success: false, message: emailResponse.message },
         { status: 500 }
       );
     }
 
     return Response.json(
-      {
-        success: true,
-        message: 'User registered successfully. Please verify your account.',
-      },
+      { success: true, message: 'User registered successfully. Please verify your account.' },
       { status: 201 }
     );
   } catch (error) {
     console.error('Error registering user:', error);
     return Response.json(
-      {
-        success: false,
-        message: 'Error registering user',
-      },
+      { success: false, message: 'Error registering user' },
       { status: 500 }
     );
   }
